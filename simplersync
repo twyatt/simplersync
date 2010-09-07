@@ -1,0 +1,189 @@
+#!/bin/bash
+
+VERBOSE=true
+CONFIG="/etc/rbackup.conf"
+
+E_OPTERR=65
+E_CFGERR=66
+E_TUNNEL=67
+
+
+# display error message
+function e {
+	echo "$1" >&2
+}
+
+# display info message
+function i {
+	if $VERBOSE; then
+		echo "$1"
+	fi
+}
+
+function load_configuration {
+	if [ -r ${CONFIG} ]; then
+		i "Loading configuration from ${CONFIG}."
+		source ${CONFIG}
+	fi
+	
+	set_default_configuration
+	check_configuration
+}
+
+function set_default_configuration {
+	TUNNEL_ESTABLISHED=false
+
+	SSH=${SSH:-`which ssh`}
+	RSYNC=${RSYNC:-`which rsync`}
+	KILL=${KILL:-`which kill`}
+	PING=${PING:-`which ping`}
+}
+
+function check_configuration {
+	if [ -z "${REMOTE_HOST}" ]; then
+		missing_config "REMOTE_HOST"
+	fi
+}
+
+function missing_config {
+	e "Missing $1 configuration directive in ${CONFIG}."
+	exit $E_CFGERR
+}
+
+function open_tunnel {
+	if [ -z "${TUNNEL_HOST}" ]; then
+		missing_config "TUNNEL_HOST"
+	fi
+
+	TUNNEL="2222:${REMOTE_HOST}:22"
+
+	# -v = increase verbosity
+	# -f = background ssh process
+	# -N = do not execute a remote command
+	# -L = tunnel connection, e.g. localhost:2222 -> 192.168.1.2:22
+	options="-f -N"
+
+	if $VERBOSE; then
+		options="-v ${options}"
+	fi
+
+	i "Establishing SSH tunnel ${TUNNEL} via ${TUNNEL_HOST} ..."
+	${SSH} \
+		${options} \
+		-L ${TUNNEL} \
+		${TUNNEL_HOST}
+	
+	if [ $? -ne 0 ]; then
+		e "Failed to establish SSH tunnel."
+		exit $E_TUNNEL
+	fi
+
+	TUNNEL_ESTABLISHED=true
+}
+
+function close_tunnel {
+	pid=`ps aux | grep ssh | grep -- "${TUNNEL}" | grep -v grep | awk '{print $2}'`
+
+	if [ -n "$pid" ]; then
+		for p in $pid; do
+			i "Closing tunnel with PID ${p}."
+			${KILL} ${p}
+		done
+	else
+		i "No active tunnels found to close."
+	fi
+}
+
+function rsync {
+	options=""
+	if $VERBOSE; then
+		options="--verbose ${options}"
+	fi
+
+	if $TUNNEL_ESTABLISHED; then
+		# set max file size to 25 megabytes
+		options="--max-size=25m ${options}"
+		options="-rsh=\'ssh -p 2222\' ${options}"
+	fi
+
+	if [ -z "$2" ]; then
+		local_url="$HOME/$1/"
+	else
+		local_url="$2"
+	fi
+
+	dir="/mnt/HD_a2/home/travis/MacBook/$1/"
+	#escaped_dir=$(printf '%q' "${dir}") # add slashes to remote directory
+	remote_url="${USER}@${RSYNC_HOST}:\"${dir}\""
+
+	i "Rsyncing ${local_url} to ${remote_url} ..."
+	${RSYNC} \
+		${options} \
+		--recursive \
+		--links \
+		--perms \
+		--executability \
+		--times \
+		--checksum \
+		--progress \
+		--delete \
+		--one-file-system \
+		--exclude='.*' \
+		"${local_url}" \
+		"${remote_url}"
+}
+
+function backup {
+#	if ! $TUNNEL_ESTABLISHED; then
+#		i
+#		i "Backing up Development Environment ..."
+#		rsync "Development"
+#	fi
+
+	i
+	i "Backing up Keychains ..."
+	rsync "Keychains" "${HOME}/Library/Keychains/"
+
+	i
+	i "Backing up SSH Keys ..."
+	rsync "SSH Keys" "${HOME}/.ssh/"
+
+	i
+	i "Backing up Desktop ..."
+	rsync "Desktop"
+
+	i
+	i "Backing up Documents ..."
+	rsync "Documents"
+}
+
+function configure_connection {
+	test_reachability ${REMOTE_HOST}
+	if [ $? -eq 0 ]; then
+		i "Remote host ${REMOTE_HOST} is reachable."
+		RSYNC_HOST=${REMOTE_HOST}
+	else
+		open_tunnel
+		RSYNC_HOST="localhost"
+	fi
+}
+
+function clean_up {
+	if $TUNNEL_ESTABLISHED; then
+		close_tunnel
+	fi
+}
+
+# Pings host to determine if it is reachable.
+# 
+# $1 host
+# $? 0 if reachable
+function test_reachability {
+	${PING} -c 1 -t 2 $1 >/dev/null 2>&1
+}
+
+
+load_configuration
+configure_connection
+backup
+clean_up
