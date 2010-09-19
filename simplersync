@@ -103,7 +103,7 @@ function rsync {
 	if $TUNNEL_ESTABLISHED; then
 		# set max file size to 25 megabytes
 		options="--max-size=25m ${options}"
-		options="-rsh=\'ssh -p 2222\' ${options}"
+		options="--rsh=""ssh -p 2222"" ${options}"
 	fi
 
 	if [ -z "$2" ]; then
