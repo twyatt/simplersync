@@ -103,7 +103,7 @@ function rsync {
 	if $TUNNEL_ESTABLISHED; then
 		# set max file size to 25 megabytes
 		options="--max-size=25m ${options}"
-		options="--rsh=""ssh -p 2222"" ${options}"
+		rsh="ssh -p 2222"
 	fi
 
 	if [ -z "$2" ]; then
@@ -117,20 +117,48 @@ function rsync {
 	remote_url="${USER}@${RSYNC_HOST}:\"${dir}\""
 
 	i "Rsyncing ${local_url} to ${remote_url} ..."
-	${RSYNC} \
-		${options} \
-		--recursive \
-		--links \
-		--perms \
-		--executability \
-		--times \
-		--checksum \
-		--progress \
-		--delete \
-		--one-file-system \
-		--exclude='.*' \
-		"${local_url}" \
-		"${remote_url}"
+
+	# Unfortunately bash would split the rsh argument into separate components if
+	# it contained spaces (e.g. "ssh -p 2222") so we have to have two possible
+	# rsync calls: one with and one without the "rsh" argument.  Be sure to keep
+	# the two calls in sync: add or remove arguments from both.
+	#
+	# http://www.linuxquestions.org/questions/programming-9/bash-variables-quotation-marks-and-curl-struggles-630151/
+	# http://thread.gmane.org/gmane.comp.web.curl.general/8716/focus=8723
+	# http://dl.dropbox.com/u/10482737/Development/documentation/Submitting%20form%20data%20breaks%20on%20various%20occasions.pdf
+
+	if [ -z "${rsh}" ]; then
+		${RSYNC} \
+			${options} \
+			--recursive \
+			--links \
+			--perms \
+			--executability \
+			--times \
+			--checksum \
+			--progress \
+			--delete \
+			--one-file-system \
+			--exclude='.*' \
+			"${local_url}" \
+			"${remote_url}"
+	else
+		${RSYNC} \
+			--rsh="${rsh}" \
+			${options} \
+			--recursive \
+			--links \
+			--perms \
+			--executability \
+			--times \
+			--checksum \
+			--progress \
+			--delete \
+			--one-file-system \
+			--exclude='.*' \
+			"${local_url}" \
+			"${remote_url}"
+	fi
 }
 
 function backup {
