@@ -1,7 +1,7 @@
 #!/bin/bash
 
 VERBOSE=false
-CONFIG="/etc/simplersync.conf"
+CONFIG="${HOME}/.simplersync.conf"
 
 E_OPTERR=65
 E_CFGERR=66
